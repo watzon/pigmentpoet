@@ -70,6 +70,17 @@ func NewBot(ctx context.Context, identifier, password, outputDir string) (*Bot, 
 	}, nil
 }
 
+// RefreshSession attempts to refresh the bot's authentication session
+func (b *Bot) RefreshSession(ctx context.Context) error {
+	if err := b.client.RefreshSession(ctx); err != nil {
+		// If refresh fails, try to reconnect
+		if err := b.client.Connect(ctx); err != nil {
+			return fmt.Errorf("failed to establish valid session: %w", err)
+		}
+	}
+	return nil
+}
+
 // generateRandomColor generates a random hex color
 func (b *Bot) generateRandomColor() string {
 	return fmt.Sprintf("#%02X%02X%02X",
@@ -80,6 +91,11 @@ func (b *Bot) generateRandomColor() string {
 
 // GenerateAndPost generates a color palette and posts it to Bluesky
 func (b *Bot) GenerateAndPost(ctx context.Context) error {
+	// Ensure we have a valid session before proceeding
+	if err := b.RefreshSession(ctx); err != nil {
+		return fmt.Errorf("failed to refresh session: %w", err)
+	}
+
 	// Generate a random base color
 	baseColor := b.generateRandomColor()
 
@@ -151,6 +167,11 @@ func (b *Bot) GenerateAndPost(ctx context.Context) error {
 
 // GenerateAndPostFromBing generates a color palette from Bing's image of the day and posts it
 func (b *Bot) GenerateAndPostFromBing(ctx context.Context) error {
+	// Ensure we have a valid session before proceeding
+	if err := b.RefreshSession(ctx); err != nil {
+		return fmt.Errorf("failed to refresh session: %w", err)
+	}
+
 	// Fetch Bing's image of the day
 	img, title, _, err := getBingImageOfDay(ctx)
 	if err != nil {

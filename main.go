@@ -23,6 +23,14 @@ func main() {
 		log.Fatal("BLUESKY_IDENTIFIER and BLUESKY_PASSWORD must be set")
 	}
 
+	// Get timezone from environment or default to UTC
+	timezone := os.Getenv("TZ")
+	location, err := time.LoadLocation(timezone)
+	if err != nil {
+		log.Printf("Warning: Invalid timezone %q, defaulting to UTC", timezone)
+		location = time.UTC
+	}
+
 	// Create output directory for palette images
 	outputDir := filepath.Join(os.TempDir(), "pigmentpoet")
 	if err := os.MkdirAll(outputDir, 0755); err != nil {
@@ -36,8 +44,19 @@ func main() {
 		log.Fatal("Failed to create bot:", err)
 	}
 
-	// Create a new cron scheduler
-	c := cron.New()
+	// Create a new cron scheduler with configured timezone
+	c := cron.New(cron.WithLocation(location))
+
+	// Schedule token refresh every hour
+	_, err = c.AddFunc("0 * * * *", func() {
+		log.Println("Refreshing authentication token...")
+		if err := b.RefreshSession(ctx); err != nil {
+			log.Printf("Error refreshing token: %v", err)
+		}
+	})
+	if err != nil {
+		log.Fatal("Failed to schedule token refresh cron job:", err)
+	}
 
 	// Schedule random palette posts every 6 hours
 	_, err = c.AddFunc("0 */6 * * *", func() {
@@ -50,8 +69,8 @@ func main() {
 		log.Fatal("Failed to schedule random palette cron job:", err)
 	}
 
-	// Schedule Bing image palette post once per day at 12:00 PM
-	_, err = c.AddFunc("0 12 * * *", func() {
+	// Schedule Bing image palette post once per day at 11:00 AM
+	_, err = c.AddFunc("0 11 * * *", func() {
 		log.Println("Generating and posting palette from Bing image of the day...")
 		if err := b.GenerateAndPostFromBing(ctx); err != nil {
 			log.Printf("Error posting Bing palette: %v", err)
