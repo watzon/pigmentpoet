@@ -14,9 +14,7 @@ import (
 
 func main() {
 	// Load environment variables
-	if err := godotenv.Load(); err != nil {
-		log.Fatal("Error loading .env file")
-	}
+	_ = godotenv.Load()
 
 	// Get Bluesky credentials from environment
 	identifier := os.Getenv("BLUESKY_IDENTIFIER")
