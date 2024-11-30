@@ -1,0 +1,17 @@
+# Ignore Go build and cache files
+*.exe
+*.so
+*_test
+_test.go
+*.test
+*.prof
+*.coverprofile
+_gopath/pkg/
+bin/
+vendor/
+
+.env
+
+# Ignore png and jpg image files
+*.png
+*.jpg
