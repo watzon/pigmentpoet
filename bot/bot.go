@@ -123,7 +123,7 @@ func (b *Bot) GenerateAndPost(ctx context.Context) error {
 
 	// Create post text
 	text := fmt.Sprintf("🎨 %s\n\n", b.getPaletteTypeName(paletteType))
-	for i, name := range names[:3] {
+	for i, name := range names {
 		text += fmt.Sprintf("%s (%s)\n", name, hexCodes[i])
 	}
 
@@ -209,7 +209,7 @@ func (b *Bot) GenerateAndPostFromBing(ctx context.Context) error {
 
 	// Create post text
 	text := fmt.Sprintf("🎨 %s\n\n", title)
-	for i, name := range names[:3] {
+	for i, name := range names {
 		text += fmt.Sprintf("%s (%s)\n", name, hexCodes[i])
 	}
 
