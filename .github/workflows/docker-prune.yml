@@ -1,0 +1,27 @@
+name: Prune containers
+
+on:
+  workflow_dispatch:
+    inputs:
+      older-than:
+        type: number
+        default: 14
+        description: "Prune containers older than X days"
+      keep-last:
+        type: number
+        default: 3
+        description: "Keep last X containers"
+
+jobs:
+  prune:
+    runs-on: ubuntu-latest
+    permissions: write-all
+    steps:
+      - name: Prune GHCR containers
+        uses: vlaurin/action-ghcr-prune@v0.5.0
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          container: pigmentpoet
+          keep-younger-than: ${{ inputs.older-than }}
+          keep-last: ${{ inputs.keep-last }}
+          prune-untagged: true
