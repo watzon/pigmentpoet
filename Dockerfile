@@ -14,4 +14,7 @@ WORKDIR /usr/app
 
 COPY --from=build /build/src/app /usr/app
 
+# Copy ca-certificates for TLS (specifically STARTTLS for SMTP)
+COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
+
 ENTRYPOINT ["./postpilot"]
