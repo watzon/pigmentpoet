@@ -1,7 +1,6 @@
 package bot
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"image"
@@ -24,7 +23,7 @@ type bingResponse struct {
 }
 
 // getBingImageOfDay fetches Bing's image of the day
-func getBingImageOfDay(ctx context.Context) (image.Image, string, string, error) {
+func getBingImageOfDay() (image.Image, string, string, error) {
 	// Fetch image metadata
 	resp, err := http.Get(bingImageURL)
 	if err != nil {

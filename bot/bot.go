@@ -8,9 +8,13 @@ import (
 	"image/jpeg"
 	"math/rand"
 	"os"
+	"strings"
 
 	"github.com/watzon/lining/client"
+	"github.com/watzon/lining/config"
+	"github.com/watzon/lining/firehose"
 	"github.com/watzon/lining/models"
+	"github.com/watzon/lining/post"
 	"github.com/watzon/pigmentpoet/color"
 )
 
@@ -29,7 +33,7 @@ type PaletteGenerator struct {
 
 // NewBot creates a new instance of the Bot
 func NewBot(ctx context.Context, identifier, password, outputDir string) (*Bot, error) {
-	bsky, err := client.NewClient(client.DefaultConfig().
+	bsky, err := client.NewClient(config.Default().
 		WithHandle(identifier).
 		WithAPIKey(password))
 	if err != nil {
@@ -173,7 +177,7 @@ func (b *Bot) GenerateAndPostFromBing(ctx context.Context) error {
 	}
 
 	// Fetch Bing's image of the day
-	img, title, _, err := getBingImageOfDay(ctx)
+	img, title, _, err := getBingImageOfDay()
 	if err != nil {
 		return fmt.Errorf("failed to get Bing image: %w", err)
 	}
@@ -254,6 +258,149 @@ func (b *Bot) GenerateAndPostFromBing(ctx context.Context) error {
 	return nil
 }
 
+// StartFirehoseListener starts listening to the Bluesky firehose for posts with #pigmentpoet
+func (b *Bot) StartFirehoseListener(ctx context.Context) error {
+	fh := firehose.NewEnhancedFirehose(b.client)
+
+	callbacks := &firehose.EnhancedFirehoseCallbacks{
+		PostHandlers: []firehose.PostHandlerWithFilter{
+			{
+				Filters: []firehose.PostFilter{
+					func(post *post.Post) bool {
+						// Check if the post contains #pigmentpoet
+						for _, tag := range post.Tags {
+							if strings.EqualFold(tag, "pigmentpoet") {
+								return true
+							}
+						}
+						return false
+					},
+				},
+				Handler: func(post *post.Post) error {
+					// Process the post in a goroutine to not block the firehose
+					go func() {
+						if err := b.handleTaggedPost(ctx, post); err != nil {
+							fmt.Printf("Error handling tagged post: %v\n", err)
+						}
+					}()
+					return nil
+				},
+			},
+		},
+	}
+
+	return fh.Subscribe(ctx, callbacks)
+}
+
+// handleTaggedPost processes a post tagged with #pigmentpoet
+func (b *Bot) handleTaggedPost(ctx context.Context, post *post.Post) error {
+	// 1. Try to get image from the tagged post
+	if post.Embed != nil {
+		if images := post.Embed.Images; len(images) > 0 {
+			// Download the image
+			data, _, err := b.client.DownloadBlob(ctx, images[0].Ref, post.Repo)
+			if err != nil {
+				return fmt.Errorf("failed to download image: %w", err)
+			}
+			// Process first image in the post
+			return b.generatePaletteFromImage(ctx, data)
+		}
+	}
+
+	// 2. Try to get image from the reply parent
+	if post.ReplyRef != nil {
+		parent, err := b.client.GetPost(ctx, post.ReplyUri)
+		if err == nil && parent != nil {
+			if parent.Embed != nil {
+				if images := parent.Embed.Images; len(images) > 0 {
+					// Download the image
+					data, _, err := b.client.DownloadBlob(ctx, images[0].Ref, parent.Repo)
+					if err != nil {
+						return fmt.Errorf("failed to download image: %w", err)
+					}
+
+					// Process first image in the parent post
+					return b.generatePaletteFromImage(ctx, data)
+				}
+			}
+		}
+	}
+
+	// 3. If no images found, generate a random palette
+	return b.GenerateAndPost(ctx)
+}
+
+// generatePaletteFromImage generates a palette from the given image URL
+func (b *Bot) generatePaletteFromImage(ctx context.Context, imageBytes []byte) error {
+	// Decode the image
+	img, _, err := image.Decode(bytes.NewReader(imageBytes))
+	if err != nil {
+		return fmt.Errorf("failed to decode image: %w", err)
+	}
+
+	colors := color.ExtractPalette(img, 5)
+
+	// Get color names and hex codes
+	var names []string
+	var hexCodes []string
+	for _, c := range colors {
+		hex := fmt.Sprintf("#%02X%02X%02X", c.R, c.G, c.B)
+		hexCodes = append(hexCodes, hex)
+		if colorName, err := b.matcher.FindClosestColor(hex); err == nil {
+			names = append(names, colorName.Name)
+		} else {
+			names = append(names, "Unknown")
+		}
+	}
+
+	// Generate palette image
+	cfg := color.PaletteImage{
+		Colors:       colors,
+		Names:        names,
+		HexCodes:     hexCodes,
+		ShowHexCodes: true,
+		ShowNames:    true,
+		InputPath:    "",
+	}
+
+	paletteImg, err := color.GeneratePaletteImage(cfg)
+	if err != nil {
+		return fmt.Errorf("failed to generate palette image: %w", err)
+	}
+
+	// Upload the palette image
+	uploadedImage, err := b.uploadImage(ctx, paletteImg)
+	if err != nil {
+		return fmt.Errorf("failed to upload palette image: %w", err)
+	}
+
+	// Create post text
+	text := fmt.Sprintf("🎨 Generated palette from image\n\n")
+	for i, name := range names {
+		text += fmt.Sprintf("%s (%s)\n", name, hexCodes[i])
+	}
+
+	post, err := client.NewPostBuilder().
+		AddText(text).
+		AddTag("Color").
+		AddTag("Design").
+		AddTag("Art").
+		WithImages([]models.UploadedImage{*uploadedImage}).
+		Build()
+	if err != nil {
+		return fmt.Errorf("failed to create post: %w", err)
+	}
+
+	// Post to Bluesky
+	_, _, err = b.client.PostToFeed(ctx, post)
+	if err != nil {
+		return fmt.Errorf("failed to post to feed: %w", err)
+	}
+
+	return nil
+}
+
+// uploadImage uploads an image to Bluesky
 func (b *Bot) uploadImage(ctx context.Context, img image.Image) (*models.UploadedImage, error) {
 	buf := new(bytes.Buffer)
 

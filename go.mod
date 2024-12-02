@@ -8,14 +8,14 @@ require (
 	github.com/joho/godotenv v1.5.1
 	github.com/nfnt/resize v0.0.0-20180221191011-83c6a9932646
 	github.com/robfig/cron/v3 v3.0.1
-	github.com/watzon/lining v0.0.0-20241130172235-a33bc11c9bb4
+	github.com/watzon/lining v0.0.0-00010101000000-000000000000
 )
 
 require (
 	github.com/DataDog/zstd v1.5.6 // indirect
 	github.com/RussellLuo/slidingwindow v0.0.0-20200528002341-535bb99d338b // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
-	github.com/bluesky-social/indigo v0.0.0-20241129200536-de950cc402b7 // indirect
+	github.com/bluesky-social/indigo v0.0.0-20241130171257-9bb22ba9e9cd // indirect
 	github.com/carlmjohnson/versioninfo v0.22.5 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/cockroachdb/errors v1.11.3 // indirect
@@ -92,6 +92,8 @@ require (
 	github.com/spaolacci/murmur3 v1.1.0 // indirect
 	github.com/whyrusleeping/cbor v0.0.0-20171005072247-63513f603b11 // indirect
 	github.com/whyrusleeping/cbor-gen v0.2.1-0.20241030202151-b7a6831be65e // indirect
+	gitlab.com/yawning/secp256k1-voi v0.0.0-20230925100816-f2616030848b // indirect
+	gitlab.com/yawning/tuplehash v0.0.0-20230713102510-df83abbf9a02 // indirect
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.57.0 // indirect
 	go.opentelemetry.io/otel v1.32.0 // indirect
 	go.opentelemetry.io/otel/metric v1.32.0 // indirect
@@ -113,4 +115,4 @@ require (
 	lukechampine.com/blake3 v1.3.0 // indirect
 )
 
-// replace github.com/watzon/lining => /home/watzon/Projects/personal/lining
+replace github.com/watzon/lining => /home/watzon/Projects/personal/lining
