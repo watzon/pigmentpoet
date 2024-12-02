@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"image"
 	"math"
-	"sort"
+	"math/rand"
 )
 
 //go:embed colors.json
@@ -30,6 +30,13 @@ type HSL struct {
 	H float64
 	S float64
 	L float64
+}
+
+// LAB represents a color in CIELAB color space
+type LAB struct {
+	L float64
+	A float64
+	B float64
 }
 
 // ColorMatcher handles color matching and analysis
@@ -158,17 +165,61 @@ func colorDifferenceHSL(c1, c2 HSL) float64 {
 		math.Pow(c1.L-c2.L, 2)
 }
 
-// Palette extraction functionality
-type Box struct {
-	rMin, rMax, gMin, gMax, bMin, bMax int
-	colors                             []Color
+// LAB color space functions
+func RGBToLAB(c Color) LAB {
+	// First convert to XYZ
+	r := float64(c.R) / 255.0
+	g := float64(c.G) / 255.0
+	b := float64(c.B) / 255.0
+
+	// Convert to sRGB
+	r = toLinear(r)
+	g = toLinear(g)
+	b = toLinear(b)
+
+	// Convert to XYZ
+	x := 0.4124564*r + 0.3575761*g + 0.1804375*b
+	y := 0.2126729*r + 0.7151522*g + 0.0721750*b
+	z := 0.0193339*r + 0.1191920*g + 0.9503041*b
+
+	// Convert XYZ to LAB
+	x = x / 0.95047
+	y = y / 1.00000
+	z = z / 1.08883
+
+	x = toLAB(x)
+	y = toLAB(y)
+	z = toLAB(z)
+
+	return LAB{
+		L: 116*y - 16,
+		A: 500 * (x - y),
+		B: 200 * (y - z),
+	}
 }
 
-func (b *Box) volume() int {
-	return (b.rMax - b.rMin + 1) * (b.gMax - b.gMin + 1) * (b.bMax - b.bMin + 1)
+func toLinear(c float64) float64 {
+	if c <= 0.04045 {
+		return c / 12.92
+	}
+	return math.Pow((c+0.055)/1.055, 2.4)
 }
 
-// ExtractPalette extracts a color palette from an image
+func toLAB(t float64) float64 {
+	if t > 0.008856 {
+		return math.Pow(t, 1.0/3.0)
+	}
+	return (903.3*t + 16) / 116
+}
+
+func LABDistance(a, b LAB) float64 {
+	dL := a.L - b.L
+	dA := a.A - b.A
+	dB := a.B - b.B
+	return math.Sqrt(dL*dL + dA*dA + dB*dB)
+}
+
+// ExtractPalette extracts a color palette from an image using k-means clustering
 func ExtractPalette(img image.Image, numColors int) []Color {
 	if numColors < 2 {
 		numColors = 2
@@ -177,99 +228,129 @@ func ExtractPalette(img image.Image, numColors int) []Color {
 		numColors = 256
 	}
 
-	// Convert image to color slice
-	var colors []Color
 	bounds := img.Bounds()
-	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
-		for x := bounds.Min.X; x < bounds.Max.X; x++ {
+	width := bounds.Max.X - bounds.Min.X
+	height := bounds.Max.Y - bounds.Min.Y
+
+	// Sample pixels using a grid to avoid over-sampling large areas
+	gridSize := int(math.Sqrt(float64(width*height) / 1000)) // Adjust sampling density
+	if gridSize < 1 {
+		gridSize = 1
+	}
+
+	var pixels []LAB
+	var rgbColors []Color
+	for y := bounds.Min.Y; y < bounds.Max.Y; y += gridSize {
+		for x := bounds.Min.X; x < bounds.Max.X; x += gridSize {
 			r, g, b, a := img.At(x, y).RGBA()
 			if a > 0 {
-				colors = append(colors, Color{
+				color := Color{
 					R: uint8(r >> 8),
 					G: uint8(g >> 8),
 					B: uint8(b >> 8),
-				})
+				}
+				lab := RGBToLAB(color)
+				pixels = append(pixels, lab)
+				rgbColors = append(rgbColors, color)
 			}
 		}
 	}
 
-	// Create initial box containing all colors
-	box := createBox(colors)
-	boxes := []*Box{box}
+	if len(pixels) == 0 {
+		return []Color{}
+	}
 
-	// Extract more colors than needed to account for filtering
-	targetColors := numColors * 2
+	// Initialize k-means centroids using k-means++ initialization
+	centroids := make([]LAB, numColors)
+	firstIdx := rand.Intn(len(pixels))
+	centroids[0] = pixels[firstIdx]
 
-	// Split boxes until we have desired number of colors
-	for len(boxes) < targetColors {
-		boxToSplit := findBoxToSplit(boxes)
-		if boxToSplit == nil {
+	for i := 1; i < numColors; i++ {
+		// Calculate distances to nearest centroid for each point
+		maxDist := 0.0
+		maxIdx := 0
+		for j, pixel := range pixels {
+			minDist := math.MaxFloat64
+			for k := 0; k < i; k++ {
+				dist := LABDistance(pixel, centroids[k])
+				if dist < minDist {
+					minDist = dist
+				}
+			}
+			if minDist > maxDist {
+				maxDist = minDist
+				maxIdx = j
+			}
+		}
+		centroids[i] = pixels[maxIdx]
+	}
+
+	// Run k-means clustering
+	maxIterations := 20
+	for iteration := 0; iteration < maxIterations; iteration++ {
+		// Assign points to nearest centroid
+		clusters := make([][]int, numColors)
+		for i, pixel := range pixels {
+			minDist := math.MaxFloat64
+			minIdx := 0
+			for j, centroid := range centroids {
+				dist := LABDistance(pixel, centroid)
+				if dist < minDist {
+					minDist = dist
+					minIdx = j
+				}
+			}
+			clusters[minIdx] = append(clusters[minIdx], i)
+		}
+
+		// Update centroids
+		moved := false
+		for i := 0; i < numColors; i++ {
+			if len(clusters[i]) == 0 {
+				continue
+			}
+			var sumL, sumA, sumB float64
+			for _, idx := range clusters[i] {
+				sumL += pixels[idx].L
+				sumA += pixels[idx].A
+				sumB += pixels[idx].B
+			}
+			newCentroid := LAB{
+				L: sumL / float64(len(clusters[i])),
+				A: sumA / float64(len(clusters[i])),
+				B: sumB / float64(len(clusters[i])),
+			}
+			if LABDistance(newCentroid, centroids[i]) > 0.1 {
+				moved = true
+			}
+			centroids[i] = newCentroid
+		}
+
+		if !moved {
 			break
 		}
-		box1, box2 := splitBox(boxToSplit)
-		boxes = append(boxes[:len(boxes)-1], box1, box2)
 	}
 
-	// Extract average color from each box
-	palette := make([]Color, len(boxes))
-	for i, box := range boxes {
-		palette[i] = averageColor(box.colors)
-	}
-
-	// Filter similar colors with a threshold of 60 (adjust this value as needed)
-	palette = filterSimilarColors(palette, 60.0)
-
-	// If we have more colors than requested, take the first numColors
-	if len(palette) > numColors {
-		palette = palette[:numColors]
-	}
-
-	return palette
-}
-
-// colorDistance calculates the Euclidean distance between two colors in RGB space
-func colorDistance(c1, c2 Color) float64 {
-	rDiff := float64(c1.R) - float64(c2.R)
-	gDiff := float64(c1.G) - float64(c2.G)
-	bDiff := float64(c1.B) - float64(c2.B)
-	return math.Sqrt(rDiff*rDiff + gDiff*gDiff + bDiff*bDiff)
-}
-
-// filterSimilarColors removes colors that are too similar to each other
-func filterSimilarColors(colors []Color, threshold float64) []Color {
-	if len(colors) <= 1 {
-		return colors
-	}
-
-	result := []Color{colors[0]}
-	for i := 1; i < len(colors); i++ {
-		isDistinct := true
-		for _, existing := range result {
-			if dist := colorDistance(colors[i], existing); dist < threshold {
-				isDistinct = false
-				break
+	// Convert centroids back to RGB colors
+	result := make([]Color, numColors)
+	for i, cluster := range centroids {
+		// Find the RGB color closest to this LAB centroid
+		minDist := math.MaxFloat64
+		var bestColor Color
+		for j, pixel := range pixels {
+			dist := LABDistance(pixel, cluster)
+			if dist < minDist {
+				minDist = dist
+				bestColor = rgbColors[j]
 			}
 		}
-		if isDistinct {
-			result = append(result, colors[i])
-		}
+		result[i] = bestColor
 	}
+
 	return result
 }
 
-// PaletteType represents different types of color palettes
-type PaletteType int
-
-const (
-	Complementary PaletteType = iota
-	Triadic
-	Analogous
-	SplitComplementary
-	Tetradic
-	Monochromatic
-)
-
-// GeneratePalette creates a palette of colors based on a base color and palette type
+// Palette generation methods
 func (m *ColorMatcher) GeneratePalette(baseHex string, paletteType PaletteType, variations int) []Color {
 	baseColor := hexToRGB(baseHex)
 	baseHSL := rgbToHSL(baseColor)
@@ -400,15 +481,15 @@ func (m *ColorMatcher) analogousPalette(base HSL, variations int) []Color {
 	angleStep := 15.0
 	colors := make([]Color, 5)
 	colors[0] = hslToRGB(base)
-	
+
 	// Two colors clockwise
 	colors[1] = hslToRGB(rotateHue(base, -angleStep))
 	colors[2] = hslToRGB(rotateHue(base, -angleStep*2))
-	
+
 	// Two colors counterclockwise
 	colors[3] = hslToRGB(rotateHue(base, angleStep))
 	colors[4] = hslToRGB(rotateHue(base, angleStep*2))
-	
+
 	return colors
 }
 
@@ -486,111 +567,13 @@ func (m *ColorMatcher) monochromaticPalette(base HSL, variations int) []Color {
 	return colors
 }
 
-func createBox(colors []Color) *Box {
-	if len(colors) == 0 {
-		return &Box{}
-	}
+type PaletteType int
 
-	box := &Box{
-		rMin: 255, rMax: 0,
-		gMin: 255, gMax: 0,
-		bMin: 255, bMax: 0,
-		colors: colors,
-	}
-
-	for _, c := range colors {
-		box.rMin = min(box.rMin, int(c.R))
-		box.rMax = max(box.rMax, int(c.R))
-		box.gMin = min(box.gMin, int(c.G))
-		box.gMax = max(box.gMax, int(c.G))
-		box.bMin = min(box.bMin, int(c.B))
-		box.bMax = max(box.bMax, int(c.B))
-	}
-
-	return box
-}
-
-func findBoxToSplit(boxes []*Box) *Box {
-	var maxBox *Box
-	maxVolume := 0
-
-	for _, box := range boxes {
-		volume := box.volume()
-		if volume > maxVolume {
-			maxVolume = volume
-			maxBox = box
-		}
-	}
-
-	return maxBox
-}
-
-func splitBox(box *Box) (*Box, *Box) {
-	// Find longest dimension
-	rRange := box.rMax - box.rMin
-	gRange := box.gMax - box.gMin
-	bRange := box.bMax - box.bMin
-
-	var dim byte
-	switch {
-	case rRange >= gRange && rRange >= bRange:
-		dim = 'r'
-	case gRange >= rRange && gRange >= bRange:
-		dim = 'g'
-	default:
-		dim = 'b'
-	}
-
-	// Sort colors along chosen dimension
-	sort.Slice(box.colors, func(i, j int) bool {
-		switch dim {
-		case 'r':
-			return box.colors[i].R < box.colors[j].R
-		case 'g':
-			return box.colors[i].G < box.colors[j].G
-		default:
-			return box.colors[i].B < box.colors[j].B
-		}
-	})
-
-	// Split at median
-	median := len(box.colors) / 2
-	box1 := createBox(box.colors[:median])
-	box2 := createBox(box.colors[median:])
-
-	return box1, box2
-}
-
-func averageColor(colors []Color) Color {
-	if len(colors) == 0 {
-		return Color{}
-	}
-
-	var rSum, gSum, bSum int
-	for _, c := range colors {
-		rSum += int(c.R)
-		gSum += int(c.G)
-		bSum += int(c.B)
-	}
-
-	count := len(colors)
-	return Color{
-		R: uint8(rSum / count),
-		G: uint8(gSum / count),
-		B: uint8(bSum / count),
-	}
-}
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
-
-func max(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
-}
+const (
+	Complementary PaletteType = iota
+	Triadic
+	Analogous
+	SplitComplementary
+	Tetradic
+	Monochromatic
+)

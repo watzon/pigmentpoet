@@ -61,7 +61,7 @@ func main() {
 	// Schedule random palette posts every 6 hours
 	_, err = c.AddFunc("0 */6 * * *", func() {
 		log.Println("Generating and posting new color palette...")
-		if err := b.GenerateAndPost(ctx); err != nil {
+		if err := b.GenerateAndPost(ctx, nil); err != nil {
 			log.Printf("Error posting palette: %v", err)
 		}
 	})
@@ -83,11 +83,17 @@ func main() {
 	// Start the scheduler
 	c.Start()
 
-	// Generate and post initial random palette
-	log.Println("Generating and posting initial random color palette...")
-	if err := b.GenerateAndPost(ctx); err != nil {
-		log.Printf("Error posting initial palette: %v", err)
+	// Start firehose listener
+	log.Println("Starting firehose listener...")
+	if err := b.StartFirehoseListener(ctx); err != nil {
+		log.Printf("Error starting firehose listener: %v", err)
 	}
+
+	// // Generate and post initial random palette
+	// log.Println("Generating and posting initial random color palette...")
+	// if err := b.GenerateAndPost(ctx); err != nil {
+	// 	log.Printf("Error posting initial palette: %v", err)
+	// }
 
 	// Keep the program running
 	for {

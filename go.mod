@@ -8,7 +8,7 @@ require (
 	github.com/joho/godotenv v1.5.1
 	github.com/nfnt/resize v0.0.0-20180221191011-83c6a9932646
 	github.com/robfig/cron/v3 v3.0.1
-	github.com/watzon/lining v0.0.0-00010101000000-000000000000
+	github.com/watzon/lining v0.0.0-20241201215848-64e30e9fab35
 )
 
 require (

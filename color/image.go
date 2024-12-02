@@ -10,6 +10,7 @@ import (
 
 	"github.com/fogleman/gg"
 	"github.com/golang/freetype/truetype"
+	"github.com/nfnt/resize"
 )
 
 //go:embed fonts/WorkSans-Regular.ttf fonts/WorkSans-Bold.ttf
@@ -24,10 +25,10 @@ const (
 
 // PaletteImage represents configuration for generating a palette image
 type PaletteImage struct {
-	Colors    []Color
-	Names     []string
-	HexCodes  []string
-	InputPath string // Optional input image path
+	Colors      []Color
+	Names       []string
+	HexCodes    []string
+	SourceImage image.Image // Optional source image
 
 	// Optional text options
 	ShowHexCodes bool
@@ -95,16 +96,16 @@ func GeneratePaletteImage(cfg PaletteImage) (image.Image, error) {
 	var barHeight float64
 	startY := 0.0
 
-	if cfg.InputPath != "" {
-		// If we have an input image, draw it first
-		if err := drawInputImage(dc, cfg.InputPath); err != nil {
+	if cfg.SourceImage != nil {
+		// If we have a source image, draw it first
+		if err := drawSourceImage(dc, cfg.SourceImage); err != nil {
 			return nil, err
 		}
 		// Color bars take up bottom 1/4 of the image
 		barHeight = float64(imageSize) / 4
 		startY = float64(imageSize) - barHeight
 	} else {
-		// Without input image, color bars take up full height
+		// Without source image, color bars take up full height
 		barHeight = float64(imageSize)
 	}
 
@@ -164,65 +165,42 @@ func GeneratePaletteImage(cfg PaletteImage) (image.Image, error) {
 	return dc.Image(), nil
 }
 
-// drawInputImage draws the input image at the top of the context
-func drawInputImage(dc *gg.Context, inputPath string) error {
-	img, err := gg.LoadImage(inputPath)
-	if err != nil {
-		return fmt.Errorf("failed to load input image: %w", err)
-	}
-
-	// Calculate dimensions for 4:3 crop
+// drawSourceImage draws the source image in the top 3/4 of the canvas
+func drawSourceImage(dc *gg.Context, img image.Image) error {
 	bounds := img.Bounds()
-	imgWidth := float64(bounds.Dx())
-	imgHeight := float64(bounds.Dy())
+	imgWidth := bounds.Max.X - bounds.Min.X
+	imgHeight := bounds.Max.Y - bounds.Min.Y
 
-	var cropWidth, cropHeight float64
-	if imgWidth/imgHeight > 4.0/3.0 {
-		// Image is wider than 4:3
-		cropHeight = imgHeight
-		cropWidth = cropHeight * 4.0 / 3.0
-	} else {
-		// Image is taller than 4:3
-		cropWidth = imgWidth
-		cropHeight = cropWidth * 3.0 / 4.0
-	}
-
-	// Calculate crop offsets to center the crop
-	cropX := (imgWidth - cropWidth) / 2
-	cropY := (imgHeight - cropHeight) / 2
-
-	// Create a new context for the cropped image
-	croppedDC := gg.NewContext(int(cropWidth), int(cropHeight))
-	croppedDC.DrawImage(img, int(-cropX), int(-cropY))
-
-	// Scale the cropped image to fill the top 3/4 of the output image while maintaining aspect ratio
-	availableHeight := float64(imageSize) * 3.0 / 4.0
-	availableWidth := float64(imageSize)
+	// Calculate target dimensions (top 3/4 of the canvas)
+	targetHeight := float64(imageSize) * 0.75
+	targetWidth := float64(imageSize)
 
 	// Calculate scaling factors for both dimensions
-	scaleX := availableWidth / cropWidth
-	scaleY := availableHeight / cropHeight
+	scaleX := targetWidth / float64(imgWidth)
+	scaleY := targetHeight / float64(imgHeight)
 
-	// Use the larger scale to ensure the image fills the space
+	// Use the larger scale to ensure the image fills the space (cover)
 	scale := math.Max(scaleX, scaleY)
 
-	// Calculate final dimensions
-	finalWidth := cropWidth * scale
-	finalHeight := cropHeight * scale
+	// Calculate scaled dimensions
+	scaledWidth := float64(imgWidth) * scale
+	scaledHeight := float64(imgHeight) * scale
 
-	// Calculate position to center the image
-	x := (availableWidth - finalWidth) / 2
-	y := (availableHeight - finalHeight) / 2
+	// Calculate cropping offsets to center the image
+	x := (float64(imageSize) - scaledWidth) / 2
+	y := (targetHeight - scaledHeight) / 2
 
-	// Create a new context for the scaled image
-	scaledDC := gg.NewContext(int(finalWidth), int(finalHeight))
+	// Resize the image
+	resized := resize.Resize(uint(scaledWidth), uint(scaledHeight), img, resize.Lanczos3)
 
-	// Draw the cropped image scaled to fill the space
-	scaledDC.Scale(scale, scale)
-	scaledDC.DrawImage(croppedDC.Image(), 0, 0)
+	// Create a new context for cropping
+	cropDC := gg.NewContext(int(targetWidth), int(targetHeight))
 
-	// Draw the final image onto the main context
-	dc.DrawImage(scaledDC.Image(), int(x), int(y))
+	// Draw the resized image at the calculated offset
+	cropDC.DrawImage(resized, int(x), int(y))
+
+	// Draw the cropped image onto the main context
+	dc.DrawImage(cropDC.Image(), 0, 0)
 	return nil
 }
 

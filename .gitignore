@@ -8,7 +8,7 @@ _test.go
 *.coverprofile
 _gopath/pkg/
 bin/
-vendor/
+# vendor/
 
 .env
 
